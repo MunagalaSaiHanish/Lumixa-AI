@@ -19,12 +19,16 @@ class KnowledgeBase:
             return
         records = []
         for chunk in chunks:
-            records.append(
-                {
-                    "text": chunk,
-                    "metadata": metadata
-                }
-            )
+
+         chunk.metadata.update(metadata)
+
+         records.append(
+        {
+            "text": chunk.text,
+            "metadata": chunk.metadata,
+            "chunk": chunk
+        }
+    )
         self._add_records(records)
     def add_chunks(self,chunks):
         if not chunks:

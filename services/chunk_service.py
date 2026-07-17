@@ -1,5 +1,6 @@
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import CHUNK_SIZE, CHUNK_OVERLAP
+from loaders.chunk import Chunk
 
 
 SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
@@ -15,7 +16,12 @@ def chunk_text(text):
     if not text.strip():
         return []
     text_splitter = get_text_splitter()
-    return text_splitter.split_text(text)
+    texts = text_splitter.split_text(text)
+
+    return [
+    Chunk(text=chunk)
+    for chunk in texts
+    ]
 
 def chunk_transcript(transcript_segments):
     text_splitter = get_text_splitter()
