@@ -3,22 +3,20 @@ from services.transcript_service import get_transcript, transcript_to_text
 from services.youtube_metadata import get_video_metadata
 from services.models.document import Document
 
-def load_youtube(url):
+def load_youtube(url: str) -> Document:
     video_id = extract_video_id(url)
     if video_id is None:
-        return None
-    transcript = get_transcript(video_id)
-    if transcript is None:
-        return None
-    text = transcript_to_text(transcript)
+        raise ValueError("Invalid YouTube URL.")
     metadata = get_video_metadata(url)
+    transcript = get_transcript(video_id)
+    text = transcript_to_text(transcript)
     return Document.create(
         source="youtube",
-        title=metadata["title"],
+        title=metadata.get("title", "Unknown Video"),
         content=text,
         metadata={
-            "channel": metadata["channel"],
-            "thumbnail": metadata["thumbnail"],
+            "channel": metadata.get("channel", "Unknown Channel"),
+            "thumbnail": metadata.get("thumbnail", ""),
             "url": url
         }
     )

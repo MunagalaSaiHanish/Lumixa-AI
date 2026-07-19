@@ -167,3 +167,46 @@ def ask_question_stream(question, context, messages=None):
 
 def ask_question(question, context, messages=None):
     return "".join(list(ask_question_stream(question, context, messages)))
+
+def generate_alternative_queries(question: str) -> list[str]:
+    """
+    Given a user's question, uses the LLM to generate 2 alternative formulations 
+    of the query to improve search coverage (Query Expansion).
+    Returns a list of alternative queries (including the original one).
+    """
+    prompt = f"""
+Given the search query below, generate exactly 2 alternative variations of this query that mean the same thing but use different vocabulary or phrasing.
+These will be used to retrieve relevant documents from a database.
+
+Return ONLY a valid JSON list of strings, for example:
+[
+  "first alternative query",
+  "second alternative query"
+]
+
+Do not include any other text, reasoning, markdown blocks (like ```json), or explanations.
+
+Query: {question}
+"""
+    messages = [
+        {"role": "system", "content": "You are a helpful query translation assistant. You speak only in JSON arrays of strings."},
+        {"role": "user", "content": prompt}
+    ]
+    
+    alternative_queries = []
+    try:
+        content = "".join(list(stream_llm_response(messages, temperature=0.2))).strip()
+        
+        # Clean potential markdown output formatting
+        if content.startswith("```"):
+            content = content.replace("```json", "").replace("```", "").strip()
+            
+        parsed = json.loads(content)
+        if isinstance(parsed, list):
+            for q in parsed:
+                if isinstance(q, str) and q.strip():
+                    alternative_queries.append(q.strip())
+    except Exception as e:
+        print(f"Query expansion error: {e}")
+        
+    return alternative_queries

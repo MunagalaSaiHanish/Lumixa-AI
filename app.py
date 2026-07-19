@@ -550,7 +550,7 @@ with source_panel:
         st.subheader("Knowledge sources")
 
         video_url = st.text_input("Video URL", placeholder="https://www.youtube.com/watch?v=...")
-        uploaded_pdfs = st.file_uploader("PDFs", type=["pdf"], accept_multiple_files=True)
+        uploaded_files = st.file_uploader("Files", type=["pdf", "docx", "pptx", "xlsx", "xls", "csv", "txt", "md"], accept_multiple_files=True)
         website_url = st.text_input("Website URL", placeholder="https://example.com")
         notes_text = st.text_area(
             "Notes",
@@ -603,45 +603,76 @@ with center_panel:
                     else:
                         try:
                             metadata = get_video_metadata(video_url)
-                            transcript = get_transcript(video_id)
-                            if transcript is None:
-                                st.error("This video has no transcript available.")
-                            else:
+                            try:
+                                transcript = get_transcript(video_id)
                                 transcript_text = transcript_to_text(transcript)
                                 st.session_state.transcript = transcript_text
                                 transcript_chunks = chunk_transcript(transcript_with_timestamps(transcript))
-                                for chunk in transcript_chunks:
-                                    chunk["metadata"] = metadata
-                                kb.add_chunks(transcript_chunks)
-                                st.session_state.metadata = metadata
-                                combined_text += transcript_text + "\n\n"
-                                source_loaded = True
+                            except Exception as e:
+                                print(f"Transcript extraction failed: {e}. Falling back to description.")
+                                desc = metadata.get("description", "")
+                                if not desc or desc.strip() == "":
+                                    desc = "No transcript or description available for this video."
+                                fallback_text = f"Video Title: {metadata.get('title')}\n\nVideo Description:\n{desc}"
+                                st.session_state.transcript = f"[No transcript available. Falling back to video description]\n\n{fallback_text}"
+                                from services.transcript_service import TranscriptSegment
+                                transcript = [TranscriptSegment(fallback_text, 0.0, 10.0)]
+                                transcript_chunks = chunk_transcript(transcript_with_timestamps(transcript))
+                            for chunk in transcript_chunks:
+                                chunk["metadata"] = metadata
+                            kb.add_chunks(transcript_chunks)
+                            st.session_state.metadata = metadata
+                            combined_text += st.session_state.transcript + "\n\n"
+                            source_loaded = True
                         except Exception as e:
                             st.error(f"Couldn't reach that video: {e}")
 
-                # PDF
-                if uploaded_pdfs:
-                    pdf_names = []
-                    for pdf_file in uploaded_pdfs:
+                # Files (mixed formats)
+                if uploaded_files:
+                    file_names = []
+                    for file in uploaded_files:
+                        name = file.name.lower()
                         try:
-                            pdf_text = extract_pdf_text(pdf_file)
-                            if pdf_text:
+                            doc = None
+                            if name.endswith('.pdf'):
+                                from services.loaders.pdf_loader import load_pdf
+                                doc = load_pdf(file)
+                            elif name.endswith('.docx'):
+                                from services.loaders.docx_loader import load_docx
+                                doc = load_docx(file)
+                            elif name.endswith('.pptx'):
+                                from services.loaders.pptx_loader import load_pptx
+                                doc = load_pptx(file)
+                            elif name.endswith('.xlsx') or name.endswith('.xls'):
+                                from services.loaders.excel_loader import load_excel
+                                doc = load_excel(file)
+                            elif name.endswith('.csv'):
+                                from services.loaders.csv_loader import load_csv
+                                doc = load_csv(file)
+                            elif name.endswith('.txt'):
+                                from services.loaders.txt_loader import load_txt
+                                doc = load_txt(file)
+                            elif name.endswith('.md'):
+                                from services.loaders.markdown_loader import load_markdown
+                                doc = load_markdown(file)
+                            
+                            if doc and doc.content.strip():
                                 kb.add_document(
-                                    text=pdf_text,
-                                    metadata={"source": "pdf", "title": pdf_file.name, "file": pdf_file.name}
+                                    text=doc.content,
+                                    metadata=doc.metadata
                                 )
-                                combined_text += pdf_text + "\n\n"
+                                combined_text += doc.content + "\n\n"
                                 source_loaded = True
-                                pdf_names.append(pdf_file.name)
+                                file_names.append(file.name)
                             else:
-                                st.warning(f"No readable text found in {pdf_file.name}.")
+                                st.warning(f"No readable text found in {file.name}.")
                         except Exception as e:
-                            st.error(f"Couldn't read PDF {pdf_file.name}: {e}")
-                    if pdf_names:
+                            st.error(f"Couldn't read file {file.name}: {e}")
+                    if file_names:
                         st.session_state.metadata = {
-                            "source": "pdf",
-                            "title": "Uploaded Documents" if len(pdf_names) > 1 else pdf_names[0],
-                            "channel": f"{len(pdf_names)} PDF files loaded" if len(pdf_names) > 1 else "PDF Document"
+                            "source": "files",
+                            "title": "Uploaded Documents" if len(file_names) > 1 else file_names[0],
+                            "channel": f"{len(file_names)} files loaded" if len(file_names) > 1 else "Document File"
                         }
 
                 # Website

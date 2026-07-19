@@ -11,3 +11,7 @@ langchain-text-splitters
 numpy
 reportlab
 yt-dlp
+python-docx
+python-pptx
+openpyxl
+xlrd

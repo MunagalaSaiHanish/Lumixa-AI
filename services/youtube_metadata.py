@@ -14,6 +14,7 @@ def get_video_metadata(video_url):
             "channel": info.get("channel", ""),
             "thumbnail": info.get("thumbnail", ""),
             "url": video_url,
+            "description": info.get("description", ""),
         }
     except Exception as e:
         print(e)
@@ -23,4 +24,5 @@ def get_video_metadata(video_url):
             "channel": "Unknown Channel",
             "thumbnail": "",
             "url": video_url,
+            "description": "",
         }

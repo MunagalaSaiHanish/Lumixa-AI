@@ -1,26 +1,18 @@
-"""
-Central configuration for Lumixa AI.
-Every configurable value in the application
-should live here.
-Services import from this file instead of
-hardcoding values.
-"""
-# Embeddings
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-
-# Chunking
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 100
-
-# Retrieval
+PARENT_CHUNK_SIZE = 1500
+PARENT_CHUNK_OVERLAP = 200
+CHILD_CHUNK_SIZE = 400
+CHILD_CHUNK_OVERLAP = 50
 TOP_K = 5
-
-# LLM
+RETRIEVAL_STRATEGY = "parent_child"
+NEIGHBOR_WINDOW = 1
+ENABLE_HYBRID_SEARCH = True
+RRF_K = 60
+ENABLE_QUERY_EXPANSION = True
+ENABLE_RERANKING = True
+RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 LLM_MODEL = "qwen/qwen3-32b"
 TEMPERATURE = 0.2
 MAX_TOKENS = 1500
-
-# Future Features
-ENABLE_RERANKING = False
-ENABLE_QUERY_EXPANSION = False
-ENABLE_HYBRID_SEARCH = False
