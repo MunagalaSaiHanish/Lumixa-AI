@@ -1,6 +1,6 @@
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import (
-    CHUNK_SIZE, 
+    CHUNK_SIZE,
     CHUNK_OVERLAP,
     PARENT_CHUNK_SIZE,
     PARENT_CHUNK_OVERLAP,

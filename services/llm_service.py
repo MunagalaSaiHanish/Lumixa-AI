@@ -170,7 +170,7 @@ def ask_question(question, context, messages=None):
 
 def generate_alternative_queries(question: str) -> list[str]:
     """
-    Given a user's question, uses the LLM to generate 2 alternative formulations 
+    Given a user's question, uses the LLM to generate 2 alternative formulations
     of the query to improve search coverage (Query Expansion).
     Returns a list of alternative queries (including the original one).
     """
@@ -192,15 +192,15 @@ Query: {question}
         {"role": "system", "content": "You are a helpful query translation assistant. You speak only in JSON arrays of strings."},
         {"role": "user", "content": prompt}
     ]
-    
+
     alternative_queries = []
     try:
         content = "".join(list(stream_llm_response(messages, temperature=0.2))).strip()
-        
+
         # Clean potential markdown output formatting
         if content.startswith("```"):
             content = content.replace("```json", "").replace("```", "").strip()
-            
+
         parsed = json.loads(content)
         if isinstance(parsed, list):
             for q in parsed:
@@ -208,5 +208,5 @@ Query: {question}
                     alternative_queries.append(q.strip())
     except Exception as e:
         print(f"Query expansion error: {e}")
-        
+
     return alternative_queries

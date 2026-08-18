@@ -58,7 +58,7 @@ class Retriever:
             q_emb = np.array(q_emb).astype("float32")
             search_k = max(target_top_k * 3, 20)
             distances, indices = self.index.search(q_emb, search_k)
-            
+
             vec_hits = []
             for idx in indices[0]:
                 if idx == -1 or idx >= len(self.vector_records):

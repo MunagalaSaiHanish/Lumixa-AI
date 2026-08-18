@@ -46,6 +46,8 @@ from services.knowledge_base import (
     KnowledgeBase
 )
 
+from services.data_engine.dataset_registry import DatasetRegistry
+
 from services.memory_service import (
     MemoryService
 )
@@ -498,11 +500,14 @@ html, body { overflow-x: hidden !important; }
 DEFAULT_STATE = {
     "knowledge_base": KnowledgeBase(),
     "memory": MemoryService(),
+    "dataset_registry": DatasetRegistry(),
     "metadata": None,
     "summary": "",
     "takeaways": [],
     "topics": [],
     "transcript": "",
+    "last_analysis": None,
+    "data_insights": [],
 }
 
 for key, value in DEFAULT_STATE.items():
@@ -512,11 +517,17 @@ for key, value in DEFAULT_STATE.items():
 def clear_workspace():
     st.session_state.knowledge_base.clear()
     st.session_state.memory.clear()
+    st.session_state.dataset_registry.clear()
     st.session_state.summary = ""
     st.session_state.takeaways = []
     st.session_state.topics = []
     st.session_state.transcript = ""
     st.session_state.metadata = None
+    st.session_state.last_analysis = None
+    st.session_state.data_insights = []
+    from services.vision_service import clear_cache
+    clear_cache()
+
 
 # sidebar
 with st.sidebar:
@@ -550,7 +561,7 @@ with source_panel:
         st.subheader("Knowledge sources")
 
         video_url = st.text_input("Video URL", placeholder="https://www.youtube.com/watch?v=...")
-        uploaded_files = st.file_uploader("Files", type=["pdf", "docx", "pptx", "xlsx", "xls", "csv", "txt", "md"], accept_multiple_files=True)
+        uploaded_files = st.file_uploader("Files", type=["pdf", "docx", "pptx", "xlsx", "xls", "csv", "txt", "md", "png", "jpg", "jpeg", "webp"], accept_multiple_files=True)
         website_url = st.text_input("Website URL", placeholder="https://example.com")
         notes_text = st.text_area(
             "Notes",
@@ -633,41 +644,72 @@ with center_panel:
                     for file in uploaded_files:
                         name = file.name.lower()
                         try:
-                            doc = None
+                            # doc_list: loaders return either a single Document or a list of Documents
+                            doc_list = []
+
                             if name.endswith('.pdf'):
                                 from services.loaders.pdf_loader import load_pdf
-                                doc = load_pdf(file)
+                                # Phase 3: pdf_loader returns a list of Documents
+                                result = load_pdf(file)
+                                doc_list = result if isinstance(result, list) else ([result] if result else [])
+
                             elif name.endswith('.docx'):
                                 from services.loaders.docx_loader import load_docx
-                                doc = load_docx(file)
+                                result = load_docx(file)
+                                doc_list = [result] if result else []
+
                             elif name.endswith('.pptx'):
                                 from services.loaders.pptx_loader import load_pptx
-                                doc = load_pptx(file)
+                                # Phase 3: pptx_loader returns a list of Documents
+                                result = load_pptx(file)
+                                doc_list = result if isinstance(result, list) else ([result] if result else [])
+
                             elif name.endswith('.xlsx') or name.endswith('.xls'):
                                 from services.loaders.excel_loader import load_excel
-                                doc = load_excel(file)
+                                # Phase 4: pass registry so DataFrames are stored for analysis
+                                result = load_excel(file, registry=st.session_state.dataset_registry)
+                                doc_list = [result] if result else []
+
                             elif name.endswith('.csv'):
                                 from services.loaders.csv_loader import load_csv
-                                doc = load_csv(file)
+                                result = load_csv(file, registry=st.session_state.dataset_registry)
+                                doc_list = [result] if result else []
+
                             elif name.endswith('.txt'):
                                 from services.loaders.txt_loader import load_txt
-                                doc = load_txt(file)
+                                result = load_txt(file)
+                                doc_list = [result] if result else []
+
                             elif name.endswith('.md'):
                                 from services.loaders.markdown_loader import load_markdown
-                                doc = load_markdown(file)
-                            
-                            if doc and doc.content.strip():
-                                kb.add_document(
-                                    text=doc.content,
-                                    metadata=doc.metadata
-                                )
-                                combined_text += doc.content + "\n\n"
-                                source_loaded = True
+                                result = load_markdown(file)
+                                doc_list = [result] if result else []
+
+                            elif name.endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                                from services.loaders.image_loader import load_image
+                                # Phase 3: image_loader returns a list of Documents
+                                doc_list = load_image(file)
+
+                            # Index every document returned by the loader
+                            file_loaded = False
+                            for doc in doc_list:
+                                if doc and doc.content.strip():
+                                    kb.add_document(
+                                        text=doc.content,
+                                        metadata=doc.metadata
+                                    )
+                                    combined_text += doc.content + "\n\n"
+                                    source_loaded = True
+                                    file_loaded = True
+
+                            if file_loaded:
                                 file_names.append(file.name)
-                            else:
-                                st.warning(f"No readable text found in {file.name}.")
+                            elif not doc_list:
+                                st.warning(f"No readable content found in {file.name}.")
+
                         except Exception as e:
                             st.error(f"Couldn't read file {file.name}: {e}")
+
                     if file_names:
                         st.session_state.metadata = {
                             "source": "files",
@@ -799,7 +841,112 @@ with center_panel:
                         label_visibility="collapsed"
                     )
 
-        # chat history
+        # --- Phase 4: Data Analyst Panel ---
+        registry = st.session_state.dataset_registry
+        if registry.has_datasets():
+            from services.data_engine.schema_inspector import inspect_schema, schema_to_text
+            from services.data_engine.insights_generator import generate_insights as gen_data_insights
+
+            with st.container(border=True):
+                st.markdown('<div class="eyebrow">Data Intelligence</div>', unsafe_allow_html=True)
+
+                # Dataset selector
+                datasets = registry.list_datasets()
+                dataset_options = [f"{d['source_name']} / {d['sheet_name']}" for d in datasets]
+                selected = st.selectbox(
+                    "Active dataset",
+                    dataset_options,
+                    label_visibility="collapsed",
+                    key="active_dataset_select"
+                )
+                sel_idx = dataset_options.index(selected)
+                sel_source = datasets[sel_idx]["source_name"]
+                sel_sheet = datasets[sel_idx]["sheet_name"]
+                st.session_state["active_dataset_name"] = sel_source
+                st.session_state["active_sheet_name"] = sel_sheet
+
+                # Schema summary
+                df_active = registry.get_dataframe(sel_source, sel_sheet)
+                if df_active is not None:
+                    schema = inspect_schema(df_active, sel_source, sel_sheet)
+                    with st.expander(f"Schema — {len(schema['columns'])} columns, {schema['row_count']:,} rows"):
+                        for col in schema["columns"]:
+                            badge = {"numeric": "🔢", "datetime": "📅", "datetime_string": "📅", "categorical": "🔤"}.get(col["column_type"], "")
+                            sample = ", ".join(col["sample_values"][:2])
+                            st.markdown(f"{badge} **{col['name']}** `{col['column_type']}`  — {sample}")
+                        if schema["has_missing_values"]:
+                            st.warning(f"Dataset has {schema['total_null_count']:,} missing values.")
+
+                    # Auto-insights (computed once on dataset select)
+                    insights_key = f"insights_{sel_source}_{sel_sheet}"
+                    if insights_key not in st.session_state:
+                        st.session_state[insights_key] = gen_data_insights(df_active, sel_source, sel_sheet)
+
+                    auto_insights = st.session_state[insights_key]
+                    if auto_insights:
+                        st.markdown('<div class="eyebrow" style="margin-top:0.7rem">Auto Insights</div>', unsafe_allow_html=True)
+                        cols_per_row = 3
+                        for i in range(0, len(auto_insights), cols_per_row):
+                            row_cols = st.columns(cols_per_row)
+                            for j, insight in enumerate(auto_insights[i:i+cols_per_row]):
+                                with row_cols[j]:
+                                    st.metric(
+                                        label=insight["title"],
+                                        value=insight["value"],
+                                        help=insight["detail"]
+                                    )
+
+            # Last analysis result
+            if st.session_state.last_analysis:
+                result = st.session_state.last_analysis
+                with st.container(border=True):
+                    st.markdown('<div class="eyebrow">Analysis Result</div>', unsafe_allow_html=True)
+                    st.markdown(f"**Question:** {result.question}")
+
+                    if result.analysis_type == "error":
+                        st.error(result.explanation)
+                    else:
+                        # Show the explanation
+                        st.markdown(result.explanation)
+
+                        # Show scalar result
+                        if result.scalar_result is not None:
+                            st.metric(
+                                label=result.metadata.get("target_column", "Result"),
+                                value=f"{result.scalar_result:,}"
+                            )
+
+                        # Show data table
+                        if result.result_data:
+                            import pandas as pd
+                            df_result = pd.DataFrame(result.result_data)
+                            st.dataframe(df_result, use_container_width=True)
+
+                        # Show chart if available
+                        viz = result.visualization
+                        if viz and viz.get("data") and viz.get("chart_type"):
+                            import pandas as pd
+                            chart_df = pd.DataFrame(viz["data"])
+                            chart_type = viz["chart_type"]
+                            x_col = viz.get("x_axis")
+                            y_col = viz.get("y_axis")
+                            if x_col and y_col and x_col in chart_df.columns and y_col in chart_df.columns:
+                                st.markdown(f"**{viz.get('title', 'Chart')}**")
+                                if chart_type == "bar":
+                                    st.bar_chart(chart_df.set_index(x_col)[y_col])
+                                elif chart_type == "line":
+                                    st.line_chart(chart_df.set_index(x_col)[y_col])
+                                elif chart_type == "scatter":
+                                    st.scatter_chart(chart_df, x=x_col, y=y_col)
+
+                        # Show warnings
+                        if result.warnings:
+                            for w in result.warnings:
+                                if w and not w.startswith("Method:") and not w.startswith("Detected") and not w.startswith("Bounds"):
+                                    st.caption(f"ℹ {w}")
+
+                    st.caption(f"Dataset: {result.dataset_name} / {result.sheet_name}  |  Operation: {result.metadata.get('operation', '')}")
+
         if st.session_state.knowledge_base.index is not None:
             for message in st.session_state.memory.get_messages():
                 with st.chat_message(message["role"]):
@@ -807,67 +954,113 @@ with center_panel:
                         st.markdown('<div class="whatsapp-user-message"></div>', unsafe_allow_html=True)
                     st.write(message["content"])
 
-            # handle active question
+            # handle active question — route to Data Analyst or RAG
             if "active_question" in st.session_state:
                 active_q = st.session_state.active_question
                 with st.chat_message("user"):
                     st.markdown('<div class="whatsapp-user-message"></div>', unsafe_allow_html=True)
                     st.write(active_q)
 
-                try:
-                    kb = st.session_state.knowledge_base
-                    memory = st.session_state.memory
+                # --- Phase 4: Route to Data Analyst if a structured dataset is active ---
+                registry = st.session_state.dataset_registry
+                active_dataset = st.session_state.get("active_dataset_name")
+                active_sheet = st.session_state.get("active_sheet_name")
+                route_to_analyst = (
+                    registry.has_datasets()
+                    and active_dataset is not None
+                    and active_sheet is not None
+                )
 
-                    with st.status("Searching Vector Database...", expanded=True) as status:
-                        retrieved_documents = kb.retrieve(question=active_q, top_k=5)
-                        context_data = build_context(retrieved_documents)
-                        status.update(label="Generating Response...", state="complete")
-
-                    with st.chat_message("assistant"):
-                        answer = st.write_stream(
-                            ask_question_stream(
+                if route_to_analyst:
+                    try:
+                        from services.data_engine.analyst import analyze
+                        with st.status("Running Data Analysis...", expanded=True) as status:
+                            analysis_result = analyze(
                                 question=active_q,
-                                context=context_data["context"],
-                                messages=memory.get_recent_messages()
+                                registry=registry,
+                                dataset_name=active_dataset,
+                                sheet_name=active_sheet,
                             )
-                        )
+                            st.session_state.last_analysis = analysis_result
+                            status.update(label="Analysis complete.", state="complete")
 
-                        citation_block = ""
-                        if context_data["sources"]:
-                            citation_block += "\n\n**Sources:**\n"
-                            for source in context_data["sources"]:
-                                citation_block += f"— {source}\n"
+                        with st.chat_message("assistant"):
+                            if analysis_result.analysis_type == "error":
+                                st.error(analysis_result.explanation)
+                                answer = analysis_result.explanation
+                            else:
+                                st.write(analysis_result.explanation)
+                                answer = analysis_result.explanation
+                                if analysis_result.result_data:
+                                    import pandas as pd
+                                    st.dataframe(pd.DataFrame(analysis_result.result_data), use_container_width=True)
 
-                        youtube_chunks = [doc for doc in retrieved_documents if "start" in doc]
-                        if youtube_chunks:
-                            citation_block += "\n\n**Mentioned in video:**\n"
-                            displayed = set()
-                            for chunk in youtube_chunks:
-                                timestamp = int(chunk["start"])
-                                if timestamp in displayed:
-                                    continue
-                                displayed.add(timestamp)
-                                minutes, seconds = timestamp // 60, timestamp % 60
-                                citation_block += f"— {minutes:02}:{seconds:02}\n"
+                        memory = st.session_state.memory
+                        memory.add_message("user", active_q)
+                        memory.add_message("assistant", answer)
 
-                        if citation_block:
-                            st.markdown(citation_block)
+                    except Exception as e:
+                        st.error(f"Data analysis failed: {e}")
 
-                    # save to memory
-                    memory.add_message("user", active_q)
-                    memory.add_message("assistant", answer + citation_block)
+                else:
+                    # --- RAG path (Phases 1–3) ---
+                    try:
+                        kb = st.session_state.knowledge_base
+                        memory = st.session_state.memory
 
-                except Exception as e:
-                    st.error(f"Couldn't answer that: {e}")
+                        with st.status("Searching Vector Database...", expanded=True) as status:
+                            retrieved_documents = kb.retrieve(question=active_q, top_k=5)
+                            context_data = build_context(retrieved_documents)
+                            status.update(label="Generating Response...", state="complete")
+
+                        with st.chat_message("assistant"):
+                            answer = st.write_stream(
+                                ask_question_stream(
+                                    question=active_q,
+                                    context=context_data["context"],
+                                    messages=memory.get_recent_messages()
+                                )
+                            )
+
+                            citation_block = ""
+                            if context_data["sources"]:
+                                citation_block += "\n\n**Sources:**\n"
+                                for source in context_data["sources"]:
+                                    citation_block += f"— {source}\n"
+
+                            youtube_chunks = [doc for doc in retrieved_documents if "start" in doc]
+                            if youtube_chunks:
+                                citation_block += "\n\n**Mentioned in video:**\n"
+                                displayed = set()
+                                for chunk in youtube_chunks:
+                                    timestamp = int(chunk["start"])
+                                    if timestamp in displayed:
+                                        continue
+                                    displayed.add(timestamp)
+                                    minutes, seconds = timestamp // 60, timestamp % 60
+                                    citation_block += f"— {minutes:02}:{seconds:02}\n"
+
+                            if citation_block:
+                                st.markdown(citation_block)
+
+                        memory.add_message("user", active_q)
+                        memory.add_message("assistant", answer + citation_block)
+
+                    except Exception as e:
+                        st.error(f"Couldn't answer that: {e}")
 
                 del st.session_state.active_question
                 st.rerun()
+
 
 # chat input
 question = st.chat_input("Ask Lumixa...")
 
 if question:
-    if st.session_state.knowledge_base.index is None:
+    registry = st.session_state.dataset_registry
+    has_kb = st.session_state.knowledge_base.index is not None
+    has_data = registry.has_datasets()
+    if not has_kb and not has_data:
         st.error("Add and analyze a source before asking a question.")
     else:
         st.session_state.active_question = question

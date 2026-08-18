@@ -16,3 +16,11 @@ RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 LLM_MODEL = "qwen/qwen3-32b"
 TEMPERATURE = 0.2
 MAX_TOKENS = 1500
+
+# Phase 3 — Visual Intelligence
+# Enable vision model calls for charts, images, diagrams in PDFs and PPTX
+ENABLE_VISION_PROCESSING = True
+# Multimodal model via OpenRouter that supports image input
+VISION_MODEL = "google/gemini-flash-1.5"
+# Pages with fewer characters than this are treated as scanned/visual-only
+VISION_MIN_TEXT_THRESHOLD = 50
